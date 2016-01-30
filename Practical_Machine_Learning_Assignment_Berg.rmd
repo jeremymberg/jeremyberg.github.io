@@ -1,0 +1,128 @@
+---
+title: "Human Activity Recognition Project"
+author: "Jeremy Berg"
+date: "January 30, 2016"
+output: html_document
+---
+
+## Executive Summary
+
+A major challenge for wearable devices is recognition not just of what exercise an individual is performing, but also how the individual is doing it. A dataset from accelerometers on the belt, forearm, arm, and dumbell of 6 participants from http://groupware.les.inf.puc-rio.br/har was analyzed. These individuals were asked to perform barbell lifts correctly and incorrectly in 5 different ways. The dataset was divided into a training set (75%) and a test/cross validation set. A random forest model was developed based on 60 variables correctly classified all cases accurately. This model was then applied to a test set to yield 99.4% accuracy.
+
+## Introduction
+
+Load training set
+```{r Load packages}
+library(caret)
+library(randomForest)
+library(ggplot2)
+```
+
+```{r Load training csv file, cache = TRUE}
+setwd("~/Data_Science_Course")
+train_set <- read.csv("pml-training.csv", stringsAsFactors = FALSE, na.strings = c("NA", "#DIV/0!", ""))
+# Eliminate columns with large numbers of missing data
+num_row <- nrow(train_set)
+print(num_row)
+# Define a function to count number of non-NA values
+count_nonNA <- function(vec) {
+        num_nonNA <- length(vec[!is.na(vec)])
+}
+num_col <- ncol(train_set)
+print(num_col)
+ncount <- integer(num_col)
+col_to_keep <- integer(0)
+for (i in 1:num_col) {
+        ncount[i] <- count_nonNA(train_set[, i])
+        if (ncount[i] == num_row) {
+              col_to_keep <- c(col_to_keep, i)
+        }
+}
+train_set_1 <- train_set[, col_to_keep]
+#print(str(train_set_1))
+num_col_1 <- ncol(train_set_1)
+print(num_col_1)
+train_set_2 <- train_set_1[, 8:num_col_1]
+num_col_2 <- ncol(train_set_2)
+train_set_2[, num_col_2] <- as.factor(train_set_2[, num_col_2])
+for (i in 1:(num_col_2 -1)) {
+        train_set_2[, i] <- as.numeric(train_set_2[, i])
+}
+#print(str(train_set_2))
+```
+
+```{r Analyze variance of categories}
+thres <- 20.0
+for (i in 1:(num_col_2 - 1)) {
+mean_col <- mean(train_set_2[, i])
+sd_col <- sd(train_set_2[, i])
+        for (j in 1:(num_row - 1)) {
+                if((abs(train_set_2[j, i] - mean_col) / sd_col) > thres) {
+#                        print(j)
+#                        print(train_set_2[j, i])
+#                        print(mean_col)
+#                        print(sd_col)
+                }
+        }
+}
+train_set_2 <- train_set_2[-5373, ]
+reg_var <- numeric(length = (num_col_2 - 1))
+for (i in 1:(num_col_2 - 1)) {
+        reg_var[i] <- (max(train_set_2[, i]) - min(train_set_2[, i]))/ sd(train_set_2[, i])
+}
+#print(reg_var)
+top_var <- sort(reg_var)[(num_col_2 - 1)]
+top_col <- which(reg_var == top_var)
+next_var <- sort(reg_var)[(num_col_2 - 2)]
+next_col <- which(reg_var == next_var)
+p_1 <- ggplot(train_set_2, aes(x = train_set_2[, top_col], y = train_set_2[, next_col], color = classe))
+p_1 <- p_1 + geom_point()
+p_1
+p_2 <- ggplot(train_set_2, aes(x = train_set_2[, 1], y = train_set_2[, 2], color = classe))
+p_2 <- p_2 + geom_point()
+p_2
+```
+
+```{r fit using random forest, cache = TRUE}
+inTrain <- createDataPartition(train_set_2$classe, p = 0.75, list = FALSE)
+train_set_to_use <- train_set_2[inTrain, ]
+test_set_to_use <- train_set_2[-inTrain, ]
+set.seed(0325)
+modelFit_rf <- train(classe ~., data = train_set_to_use, method = "rf")
+```
+
+```{r output and analysis}
+predictions_rf <- predict(modelFit_rf, train_set_to_use)
+confusionMatrix(predictions_rf, train_set_to_use$classe)
+results_rf <- data.frame(train_set_to_use$classe)
+results_rf <- cbind(results_rf, predictions_rf)
+colnames(results_rf) <- c("Observed", "Predicted")
+p_3 <- ggplot(results_rf, aes(x = Observed, y = Predicted))
+p_3 <- p_3 + geom_jitter(position = position_jitter(width = 0.25, height = 0.25))
+p_3
+predictions_rf_test <- predict(modelFit_rf, test_set_to_use)
+confusionMatrix(predictions_rf_test, test_set_to_use$classe)
+results_rf_test <- data.frame(test_set_to_use$classe)
+results_rf_test <- cbind(results_rf_test, predictions_rf_test)
+colnames(results_rf_test) <- c("Observed", "Predicted")
+p_4 <- ggplot(results_rf_test, aes(x = Observed, y = Predicted))
+p_4 <- p_4 + geom_jitter(position = position_jitter(width = 0.25, height = 0.25))
+p_4
+```
+```{r Load test csv file, cache = TRUE}
+test_set <- read.csv("pml-testing.csv", stringsAsFactors = FALSE, na.strings = c("NA", "#DIV/0!", ""))
+test_set_1 <- test_set[, col_to_keep]
+#print(str(test_set_1))
+test_set_2 <- test_set_1[, 8:num_col_1]
+test_set_2[, num_col_2] <- as.factor(test_set_2[, num_col_2])
+for (i in 1:(num_col_2 -1)) {
+        test_set_2[, i] <- as.numeric(test_set_2[, i])
+}
+#print(str(test_set_2))
+```
+```{r output and analysis of testing set}
+predictions_rf_test <- predict(modelFit_rf, test_set_2)
+print(predictions_rf_test)
+```
+
+
