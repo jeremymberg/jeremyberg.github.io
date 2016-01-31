@@ -1,35 +1,46 @@
 ---
 title: "Human Activity Recognition Project"
 author: "Jeremy Berg"
-date: "January 30, 2016"
+date: "January 31, 2016"
 output: html_document
 ---
 
-## Executive Summary
+# Executive Summary
 
-A major challenge for wearable devices is recognition not just of what exercise an individual is performing, but also how the individual is doing it. A dataset from accelerometers on the belt, forearm, arm, and dumbell of 6 participants from http://groupware.les.inf.puc-rio.br/har was analyzed. These individuals were asked to perform barbell lifts correctly and incorrectly in 5 different ways. The dataset was divided into a training set (75%) and a test/cross validation set. A random forest model was developed based on 60 variables correctly classified all cases accurately. This model was then applied to a test set to yield 99.4% accuracy.
+A major challenge for analyzing data from wearable devices is recognition not just of what exercise an individual is performing, but also how the individual is doing it. A dataset from accelerometers on the belt, forearm, arm, and dumbell of 6 participants from http://groupware.les.inf.puc-rio.br/har was analyzed. These individuals were asked to perform barbell lifts correctly and incorrectly in 5 different ways. The dataset was divided into a training set (75%) and a test/cross validation set (25%). A random forest model was developed based on 60 variables that correctly classified all cases in the training set accurately. This model was then applied to a cross validation set to yield 99.4% accuracy.
 
 ## Introduction
 
-Load training set
-```{r Load packages}
+(From http://groupware.les.inf.puc-rio.br/har)
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. Participants were supervised by an experienced weight lifter to make sure the execution complied to the manner they were supposed to simulate. The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. We made sure that all participants could easily simulate the mistakes in a safe and controlled manner by using a relatively light dumbbell (1.25kg).
+
+## Data Loading and Cleaning
+
+```{r Load packages, echo = FALSE}
 library(caret)
 library(randomForest)
 library(ggplot2)
 ```
 
+The dataset (pml-training.csv) was first loaded.
+
 ```{r Load training csv file, cache = TRUE}
-setwd("~/Data_Science_Course")
+setwd("~/Data_Science_Course/jeremyberg.github.io")
 train_set <- read.csv("pml-training.csv", stringsAsFactors = FALSE, na.strings = c("NA", "#DIV/0!", ""))
-# Eliminate columns with large numbers of missing data
 num_row <- nrow(train_set)
-print(num_row)
+num_col <- ncol(train_set)
+```
+
+The original dataset has `r num_row` rows and `r num_col` columns. As a first step in cleaning up the dataset, the dataset was checked for missing data.
+
+```{r Search for missing data}
+# Eliminate columns with large numbers of missing data
 # Define a function to count number of non-NA values
 count_nonNA <- function(vec) {
         num_nonNA <- length(vec[!is.na(vec)])
 }
-num_col <- ncol(train_set)
-print(num_col)
 ncount <- integer(num_col)
 col_to_keep <- integer(0)
 for (i in 1:num_col) {
@@ -39,17 +50,18 @@ for (i in 1:num_col) {
         }
 }
 train_set_1 <- train_set[, col_to_keep]
-#print(str(train_set_1))
 num_col_1 <- ncol(train_set_1)
-print(num_col_1)
 train_set_2 <- train_set_1[, 8:num_col_1]
 num_col_2 <- ncol(train_set_2)
 train_set_2[, num_col_2] <- as.factor(train_set_2[, num_col_2])
 for (i in 1:(num_col_2 -1)) {
         train_set_2[, i] <- as.numeric(train_set_2[, i])
 }
-#print(str(train_set_2))
 ```
+
+A substantial number of the columns were found to be incomplete, that is, have values only for a subset of the rows. For further analysis, the dataset was restricted to the `r num_col_2` columns by elimnation of these incomplete columns as well as those that did not contain measurement information.
+
+The next step in cleaning up the dataset, the data were examined for data points that were substantially outside the distribution for the corresponding variable. The data for each variable were normalized by subtracting the mean and dividing by the standard deviation. These normalized data were examined for data points that were more than a threshold, set at 20, times the standard deviation away from the mean.
 
 ```{r Analyze variance of categories}
 thres <- 20.0
@@ -65,23 +77,48 @@ sd_col <- sd(train_set_2[, i])
                 }
         }
 }
+```
+A single data point was found to lie outside the distribution for several variables and was removed from the dataset for further analysis.
+
+```{r Remove outlier data point}
 train_set_2 <- train_set_2[-5373, ]
+```
+
+## Data Analysis
+```{r Examine data for variables with the largest distribution}
 reg_var <- numeric(length = (num_col_2 - 1))
 for (i in 1:(num_col_2 - 1)) {
         reg_var[i] <- (max(train_set_2[, i]) - min(train_set_2[, i]))/ sd(train_set_2[, i])
 }
-#print(reg_var)
 top_var <- sort(reg_var)[(num_col_2 - 1)]
 top_col <- which(reg_var == top_var)
 next_var <- sort(reg_var)[(num_col_2 - 2)]
 next_col <- which(reg_var == next_var)
+```
+
+The two variables with the largest normalized ranges were plotted against each other.
+
+```{r Scatter plot for two variables with largest spread}
 p_1 <- ggplot(train_set_2, aes(x = train_set_2[, top_col], y = train_set_2[, next_col], color = classe))
 p_1 <- p_1 + geom_point()
 p_1
+```
+
+These two variables appear to have approximately normal distributions.
+
+For comparison, the first two variables in the dataset were plotted against each other.
+
+```{r Scatter plot for first two variables}
 p_2 <- ggplot(train_set_2, aes(x = train_set_2[, 1], y = train_set_2[, 2], color = classe))
 p_2 <- p_2 + geom_point()
 p_2
 ```
+
+This plot revealed that the distributions for both variables were multimodal. This may limit the effectiveness of linear models.
+
+## Model Construction
+
+A random forest model was selected as the initial choice because this method tends to be relatively accurate. The dataset was first divided into a training set with 75% of the data and cross-validation testing set with 25% of the data. A random forest model was these contructed using all of the variables remaininig in the dataset. 
 
 ```{r fit using random forest, cache = TRUE}
 inTrain <- createDataPartition(train_set_2$classe, p = 0.75, list = FALSE)
@@ -91,7 +128,10 @@ set.seed(0325)
 modelFit_rf <- train(classe ~., data = train_set_to_use, method = "rf")
 ```
 
-```{r output and analysis}
+## Results
+The results of this random forest model on the training dataset are shown below:
+
+```{r output and analysis on training set}
 predictions_rf <- predict(modelFit_rf, train_set_to_use)
 confusionMatrix(predictions_rf, train_set_to_use$classe)
 results_rf <- data.frame(train_set_to_use$classe)
@@ -100,6 +140,13 @@ colnames(results_rf) <- c("Observed", "Predicted")
 p_3 <- ggplot(results_rf, aes(x = Observed, y = Predicted))
 p_3 <- p_3 + geom_jitter(position = position_jitter(width = 0.25, height = 0.25))
 p_3
+```
+
+The random forest model was 100% accurate on the training set. This is highly encouraging although this outcome does suggest the possibility of overfitting.
+
+The same random forest model was applied to the test set for the purpose of cross-validation. The results are shown below:
+
+```{r output and analysis on cross validation set}
 predictions_rf_test <- predict(modelFit_rf, test_set_to_use)
 confusionMatrix(predictions_rf_test, test_set_to_use$classe)
 results_rf_test <- data.frame(test_set_to_use$classe)
@@ -109,20 +156,23 @@ p_4 <- ggplot(results_rf_test, aes(x = Observed, y = Predicted))
 p_4 <- p_4 + geom_jitter(position = position_jitter(width = 0.25, height = 0.25))
 p_4
 ```
+
+The results were quite impressive with an overall accuracy of 99.4% and accuracies of over 99% in distinguishing all groups. Because of the success of this model, no additional models were pursued.
+
+## Application to Test Data
+
+The test dataset was loaded and then processed in the same manner as the training set above. The random forest model was applied to the test dataset to produce predictions for the 20 data points. 
+
 ```{r Load test csv file, cache = TRUE}
 test_set <- read.csv("pml-testing.csv", stringsAsFactors = FALSE, na.strings = c("NA", "#DIV/0!", ""))
 test_set_1 <- test_set[, col_to_keep]
-#print(str(test_set_1))
 test_set_2 <- test_set_1[, 8:num_col_1]
 test_set_2[, num_col_2] <- as.factor(test_set_2[, num_col_2])
 for (i in 1:(num_col_2 -1)) {
         test_set_2[, i] <- as.numeric(test_set_2[, i])
 }
-#print(str(test_set_2))
 ```
 ```{r output and analysis of testing set}
 predictions_rf_test <- predict(modelFit_rf, test_set_2)
 print(predictions_rf_test)
 ```
-
-
